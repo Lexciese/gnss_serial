@@ -96,7 +96,7 @@ namespace gnss_serial
     }
     
     // Try reading with different terminators with longer timeout for 5Hz data
-    bytesRead = serial_port_->readString(buffer, '\n', sizeof(buffer) - 1, 250);
+    bytesRead = serial_port_->readString(buffer, '\n', sizeof(buffer) - 1, 1000);
     
     if (bytesRead > 0) {
       // Remove any trailing whitespace or control characters
