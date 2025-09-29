@@ -247,7 +247,7 @@ int main(int argc, char* argv[]) {
       rclcpp::create_timer(node, node->get_clock(), timer_duration,
                            [node]() -> void { node->read(); });
   exec.add_node(node);
-  rclcpp::spin(node);
+  exec.spin();
   rclcpp::shutdown();
   return 0;
 }
