@@ -60,12 +60,6 @@ GNSS_Serial::GNSS_Serial()
   fix_type_publisher_ =
       this->create_publisher<std_msgs::msg::Int32>("gnss/fix_type", 10);
 
-  // Initialize serial connection
-  if (!initialize_serial_connection()) {
-    RCLCPP_ERROR(this->get_logger(), "Failed to initialize serial connection");
-    return;
-  }
-
   RCLCPP_INFO(this->get_logger(), "GNSS Hardware node initialized");
 }
 GNSS_Serial::~GNSS_Serial() {
@@ -75,12 +69,15 @@ GNSS_Serial::~GNSS_Serial() {
   }
 }
 
-bool GNSS_Serial::initialize_serial_connection() {
+bool GNSS_Serial::on_init() {
   if (!serial_port_ ||
       serial_port_->openDevice(portname_.c_str(), baudrate_) != 1) {
     RCLCPP_ERROR(this->get_logger(), "Failed to open serial port: %s",
                  portname_.c_str());
+    return false;
   }
+  serial_port_->DTR(false);
+  serial_port_->DTR(true);
   RCLCPP_INFO(this->get_logger(), "Successfully connected to serial port: %s",
               portname_.c_str());
   return true;
@@ -99,7 +96,7 @@ void GNSS_Serial::read() {
   bytesRead = serial_port_->readString(buffer, '\n', sizeof(buffer) - 1, 10000);
 
   if (bytesRead > 0) {
-    parse_gnss_data(buffer);
+    parse(buffer);
 
     if (gnss_valid_) {
       rclcpp::Time timestamp;
@@ -178,7 +175,7 @@ void GNSS_Serial::read() {
   }
 }
 
-void GNSS_Serial::parse_gnss_data(const char* raw_data) {
+void GNSS_Serial::parse(const char* raw_data) {
   // Expected format: "lat,lon,alt,vel,fix,rtk,hour,min,sec"
 
   double lat, lon, alt, vel;
@@ -242,7 +239,12 @@ int main(int argc, char* argv[]) {
 
   rclcpp::executors::SingleThreadedExecutor exec;
 
-  rclcpp::Duration timer_duration = rclcpp::Duration::from_seconds(1.0 / node->publish_rate_);
+  if (!node->on_init()) {
+    return -1;
+  }
+
+  rclcpp::Duration timer_duration =
+      rclcpp::Duration::from_seconds(1.0 / node->publish_rate_);
   rclcpp::TimerBase::SharedPtr timer =
       rclcpp::create_timer(node, node->get_clock(), timer_duration,
                            [node]() -> void { node->read(); });
