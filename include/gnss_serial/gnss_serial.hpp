@@ -34,6 +34,7 @@ namespace gnss_serial {
 
     std::string portname_;
     int baudrate_;
+    double publish_rate_;
 
     // GNSS data
     uint8_t hour_;

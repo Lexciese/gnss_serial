@@ -39,14 +39,14 @@ GNSS_Serial::GNSS_Serial()
       second_(0),
       gnss_timestamp_valid_(false) {
   // Declare parameters
-  this->declare_parameter("portname", std::string("/dev/ttyUSB1"));
+  this->declare_parameter("portname", std::string("/dev/gnss_device"));
   this->declare_parameter("baudrate", 115200);
   this->declare_parameter("publish_rate_hz", 10.0);
 
   // Get parameters
   portname_ = this->get_parameter("portname").as_string();
   baudrate_ = this->get_parameter("baudrate").as_int();
-  double publish_rate = this->get_parameter("publish_rate_hz").as_double();
+  publish_rate_ = this->get_parameter("publish_rate_hz").as_double();
 
   // Initialize serial port
   serial_port_ = std::make_unique<serialib>();
@@ -242,7 +242,7 @@ int main(int argc, char* argv[]) {
 
   rclcpp::executors::SingleThreadedExecutor exec;
 
-  rclcpp::Duration timer_duration = rclcpp::Duration::from_seconds(1.0 / 10.0);
+  rclcpp::Duration timer_duration = rclcpp::Duration::from_seconds(1.0 / publish_rate_);
   rclcpp::TimerBase::SharedPtr timer =
       rclcpp::create_timer(node, node->get_clock(), timer_duration,
                            [node]() -> void { node->read(); });
