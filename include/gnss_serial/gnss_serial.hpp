@@ -24,9 +24,9 @@ namespace gnss_serial {
     GNSS_Serial();
     ~GNSS_Serial();
 
-    void parse_gnss_data(const char* raw_data);
+    bool on_init();
     void read();
-    bool initialize_serial_connection();
+    void parse(const char* raw_data);
 
     double publish_rate_;
 
