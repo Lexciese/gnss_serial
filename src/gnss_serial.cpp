@@ -242,7 +242,7 @@ int main(int argc, char* argv[]) {
 
   rclcpp::executors::SingleThreadedExecutor exec;
 
-  rclcpp::Duration timer_duration = rclcpp::Duration::from_seconds(1.0 / publish_rate_);
+  rclcpp::Duration timer_duration = rclcpp::Duration::from_seconds(1.0 / node->publish_rate_);
   rclcpp::TimerBase::SharedPtr timer =
       rclcpp::create_timer(node, node->get_clock(), timer_duration,
                            [node]() -> void { node->read(); });

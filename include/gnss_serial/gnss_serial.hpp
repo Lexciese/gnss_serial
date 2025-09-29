@@ -28,13 +28,15 @@ namespace gnss_serial {
     void read();
     bool initialize_serial_connection();
 
+    double publish_rate_;
+
   private:
     std::unique_ptr<serialib> serial_port_;
     std::atomic<bool> stop_thread;
 
     std::string portname_;
     int baudrate_;
-    double publish_rate_;
+    
 
     // GNSS data
     uint8_t hour_;
