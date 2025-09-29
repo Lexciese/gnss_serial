@@ -25,7 +25,7 @@ namespace gnss_serial {
     ~GNSS_Serial();
 
     void parse_gnss_data(const char* raw_data);
-    void timer_callback();
+    void read();
     bool initialize_serial_connection();
 
   private:
@@ -36,7 +36,9 @@ namespace gnss_serial {
     int baudrate_;
 
     // GNSS data
-    int gnss_seconds_;
+    uint8_t hour_;
+    uint8_t minute_;
+    uint8_t second_;
     double latitude_;
     double longitude_;
     double altitude_;
