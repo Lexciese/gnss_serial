@@ -78,6 +78,9 @@ bool GNSS_Serial::on_init() {
   }
   serial_port_->DTR(false);
   serial_port_->DTR(true);
+  char discard_buffer[256];
+  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+  serial_port_->flushReceiver();
   RCLCPP_INFO(this->get_logger(), "Successfully connected to serial port: %s",
               portname_.c_str());
   return true;
