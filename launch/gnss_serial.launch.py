@@ -13,7 +13,7 @@ def generate_launch_description():
     declared_arguments.append(
         DeclareLaunchArgument(
             "portname",
-            default_value="/dev/ttyUSB1",
+            default_value="/dev/gnss_device",
             description="Serial port name for the microcontroller",
         )
     )
