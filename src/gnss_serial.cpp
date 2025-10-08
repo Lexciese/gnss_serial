@@ -143,9 +143,12 @@ void GNSS_Serial::read() {
       // GNSS)
       double position_covariance = 1.0;     // 1 meter standard deviation
       if (carrier_solution_ == 2) {         // RTK Fix
-        position_covariance = 0.01;         // 1 cm
+        position_covariance = 0.01;         // 1cm
       } else if (carrier_solution_ == 1) {  // RTK Float
-        position_covariance = 0.1;          // 10 cm
+        position_covariance = 0.02;          // 2 cm
+      }
+      else if (carrier_solution_ == 0) {
+        position_covariance = 0.2; // 20 cm
       }
 
       gnss_msg.position_covariance[0] = position_covariance;  // East
