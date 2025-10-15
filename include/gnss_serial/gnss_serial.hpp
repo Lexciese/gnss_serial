@@ -42,6 +42,7 @@ namespace gnss_serial {
     uint8_t hour_;
     uint8_t minute_;
     uint8_t second_;
+    uint8_t nanosecond_;
     double latitude_;
     double longitude_;
     double altitude_;

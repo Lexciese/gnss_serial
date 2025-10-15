@@ -113,8 +113,9 @@ void GNSS_Serial::read() {
         utc_tm.tm_sec = static_cast<int>(second_);
 
         std::time_t gnss_time = timegm(&utc_tm);
+        uint32_t nanoseconds = static_cast<uint32_t>(nanosecond_);
         timestamp =
-            rclcpp::Time(static_cast<int64_t>(gnss_time), 0, RCL_SYSTEM_TIME);
+            rclcpp::Time(static_cast<int64_t>(gnss_time), nanoseconds, RCL_SYSTEM_TIME);
       } else {
         timestamp = this->get_clock()->now();
       }
@@ -139,8 +140,6 @@ void GNSS_Serial::read() {
 
       gnss_msg.status.service = sensor_msgs::msg::NavSatStatus::SERVICE_GPS;
 
-      // Set covariance (simplified - you may want to get actual values from
-      // GNSS)
       double position_covariance = 1.0;     // 1 meter standard deviation
       if (carrier_solution_ == 2) {         // RTK Fix
         position_covariance = 0.01;         // 1cm
@@ -182,18 +181,19 @@ void GNSS_Serial::read() {
 }
 
 void GNSS_Serial::parse(const char* raw_data) {
-  // Expected format: "lat,lon,alt,vel,fix,rtk,hour,min,sec"
+  // Expected format: "lat,lon,alt,vel,fix,rtk,hour,min,sec,nsec"
 
   double lat, lon, alt, vel;
   int fix, rtk;
   int hour_tmp = 0;
   int minute_tmp = 0;
   int second_tmp = 0;
+  int nanosecond_tmp = 0;
 
   // Try to parse the custom format - handle concatenated e and f fields
   int parsed =
-      sscanf(raw_data, "%lf,%lf,%lf,%lf,%d,%d,%d,%d,%d", &lat, &lon, &alt, &vel,
-             &fix, &rtk, &hour_tmp, &minute_tmp, &second_tmp);
+      sscanf(raw_data, "%lf,%lf,%lf,%lf,%d,%d,%d,%d,%d,%d", &lat, &lon, &alt, &vel,
+             &fix, &rtk, &hour_tmp, &minute_tmp, &second_tmp, &nanosecond_tmp);
 
   if (parsed >= 6) {
     latitude_ = lat;
@@ -203,7 +203,7 @@ void GNSS_Serial::parse(const char* raw_data) {
     fix_type_ = fix;
     carrier_solution_ = rtk;
 
-    if (parsed >= 9) {
+    if (parsed >= 10) {
       bool time_fields_valid = hour_tmp >= 0 && hour_tmp < 24 &&
                                minute_tmp >= 0 && minute_tmp < 60 &&
                                second_tmp >= 0 && second_tmp < 60;
@@ -212,22 +212,20 @@ void GNSS_Serial::parse(const char* raw_data) {
         hour_ = static_cast<uint8_t>(hour_tmp);
         minute_ = static_cast<uint8_t>(minute_tmp);
         second_ = static_cast<uint8_t>(second_tmp);
+        nanosecond_ = static_cast<uint8_t>(nanosecond_tmp);
         gnss_timestamp_valid_ = true;
       } else {
         gnss_timestamp_valid_ = false;
         RCLCPP_WARN(this->get_logger(),
                     "Received GNSS time with invalid fields: hour=%d, "
-                    "minute=%d, second=%d",
-                    hour_tmp, minute_tmp, second_tmp);
+                    "minute=%d, second=%d, nsec=%d",
+                    hour_tmp, minute_tmp, second_tmp, nanosecond_tmp);
       }
     } else {
       gnss_timestamp_valid_ = false;
     }
 
     gnss_valid_ = true;
-    // RCLCPP_WARN(this->get_logger(),
-    //             "Successfully parsed GNSS data: lat=%.6f, lon=%.6f, alt=%.2f,
-    //             " "vel=%.2f, fix=%d, rtk=%d", lat, lon, alt, vel, fix, rtk);
   } else {
     gnss_valid_ = false;
     RCLCPP_WARN_THROTTLE(
