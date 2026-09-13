@@ -1,27 +1,21 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-    <name>gnss_serial</name>
-    <version>0.0.0</version>
-    <description>Microcontroller Hardware for interfacing with the microcontroller</description>
+  <name>gnss_serial</name>
+  <version>0.0.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="falahnzk.dev@gmail.com">lexciese</maintainer>
+  <license>TODO: License declaration</license>
 
-    <maintainer email="altairgmrt@gmail.com">altair</maintainer>
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
 
-    <license>TODO</license>
-    <author email="falahnzk@gmail.com">Falah Naufal Zaki</author>
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
 
-
-    <buildtool_depend>ament_cmake</buildtool_depend>
-
-    <depend>rclcpp</depend>
-    <depend>std_msgs</depend>
-    <depend>sensor_msgs</depend>
-    <depend>geometry_msgs</depend>
-    <!-- <depend>libserial-dev</depend> -->
-
-    <test_depend>ament_cmake_pytest</test_depend>
-
-    <export>
-        <build_type>ament_cmake</build_type>
-    </export>
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
 </package>
