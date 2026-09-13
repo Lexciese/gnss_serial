@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'gnss_serial = gnss_serial.gnss_serial:main',
         ],
     },
 )
