@@ -16,6 +16,7 @@
 
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include <rclcpp/qos.hpp>
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
 #include "std_msgs/msg/int32.hpp"
 
@@ -51,14 +52,19 @@ GNSS_Serial::GNSS_Serial()
   // Initialize serial port
   serial_port_ = std::make_unique<serialib>();
 
+  rclcpp::QoS qos(10);
+  qos.keep_last(10);
+  qos.best_effort();
+  qos.durability_volatile();
+
   // Create publishers
   gnss_publisher_ =
-      this->create_publisher<sensor_msgs::msg::NavSatFix>("gnss/fix", 10);
+      this->create_publisher<sensor_msgs::msg::NavSatFix>("gnss/fix", qos);
   velocity_publisher_ =
       this->create_publisher<geometry_msgs::msg::TwistStamped>(
-          "gnss/fix_velocity", 10);
+          "gnss/fix_velocity", qos);
   fix_type_publisher_ =
-      this->create_publisher<std_msgs::msg::Int32>("gnss/fix_type", 10);
+      this->create_publisher<std_msgs::msg::Int32>("gnss/fix_type", qos);
 
   RCLCPP_INFO(this->get_logger(), "GNSS Hardware node initialized");
 }
