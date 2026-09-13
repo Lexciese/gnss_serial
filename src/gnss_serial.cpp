@@ -96,10 +96,16 @@ void GNSS_Serial::read() {
     return;
   }
 
-  bytesRead = serial_port_->readString(buffer, '\n', sizeof(buffer) - 1, 10000);
+  char latest_buffer[256] = {0};
+  bool has_new_data = false;
 
-  if (bytesRead > 0) {
-    parse(buffer);
+  while ((bytesRead = serial_port_->readString(buffer, '\n', sizeof(buffer) - 1, 5)) > 0) {
+    std::memcpy(latest_buffer, buffer, sizeof(latest_buffer));
+    has_new_data = true;
+  }
+
+  if (has_new_data) {
+    parse(latest_buffer);
 
     if (gnss_valid_) {
       rclcpp::Time timestamp;
@@ -108,6 +114,16 @@ void GNSS_Serial::read() {
         auto current_time = std::chrono::system_clock::to_time_t(now);
         std::tm utc_tm{};
         gmtime_r(&current_time, &utc_tm);
+
+        // UTC Midnight Rollover Protection
+        if (utc_tm.tm_hour == 23 && hour_ == 0) {
+          current_time += 86400;
+          gmtime_r(&current_time, &utc_tm);
+        } else if (utc_tm.tm_hour == 0 && hour_ == 23) {
+          current_time -= 86400;
+          gmtime_r(&current_time, &utc_tm);
+        }
+
         utc_tm.tm_hour = static_cast<int>(hour_);
         utc_tm.tm_min = static_cast<int>(minute_);
         utc_tm.tm_sec = static_cast<int>(second_);
@@ -212,7 +228,7 @@ void GNSS_Serial::parse(const char* raw_data) {
         hour_ = static_cast<uint8_t>(hour_tmp);
         minute_ = static_cast<uint8_t>(minute_tmp);
         second_ = static_cast<uint8_t>(second_tmp);
-        nanosecond_ = static_cast<uint8_t>(nanosecond_tmp);
+        nanosecond_ = static_cast<uint32_t>(nanosecond_tmp);
         gnss_timestamp_valid_ = true;
       } else {
         gnss_timestamp_valid_ = false;
