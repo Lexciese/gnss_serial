@@ -1,5 +1,3 @@
-import datetime
-import math
 import sys
 import time
 from typing import Optional
@@ -7,7 +5,6 @@ from typing import Optional
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
-from rclpy.time import Time
 from sensor_msgs.msg import NavSatFix, NavSatStatus
 from geometry_msgs.msg import TwistStamped
 from std_msgs.msg import Int32
@@ -22,11 +19,13 @@ class GNSSSerial(Node):
         self.declare_parameter('portname', '/dev/ttyUSB0')
         self.declare_parameter('baudrate', 115200)
         self.declare_parameter('publish_rate_hz', 10.0)
+        self.declare_parameter('frame_id', 'gnss_link')
 
         # Get parameters
         self.portname: str = self.get_parameter('portname').get_parameter_value().string_value
         self.baudrate: int = self.get_parameter('baudrate').get_parameter_value().integer_value
         self.publish_rate: float = self.get_parameter('publish_rate_hz').get_parameter_value().double_value
+        self.frame_id: str = self.get_parameter('frame_id').get_parameter_value().string_value
 
         # Member variables state
         self.latitude: float = 0.0
@@ -37,12 +36,8 @@ class GNSSSerial(Node):
         self.carrier_solution: int = 0
         self.gnss_valid: bool = False
 
-        self.hour: int = 0
-        self.minute: int = 0
-        self.second: int = 0
-        self.nanosecond: int = 0
-        self.gnss_timestamp_valid: bool = False
-
+        # Persistent serial read buffer to prevent mid-line frame tearing
+        self._rx_buffer: str = ''
         self.serial_port: Optional[serial.Serial] = None
 
         # Custom QoS setup (matching C++ Best Effort QoS)
@@ -65,7 +60,7 @@ class GNSSSerial(Node):
             self.serial_port = serial.Serial(
                 port=self.portname,
                 baudrate=self.baudrate,
-                timeout=0.005  # non-blocking / quick read timeout (5ms)
+                timeout=0.005
             )
 
             # DTR Toggle
@@ -74,6 +69,7 @@ class GNSSSerial(Node):
 
             time.sleep(1.0)
             self.serial_port.reset_input_buffer()
+            self._rx_buffer = ''
 
             self.get_logger().info(f'Successfully connected to serial port: {self.portname}')
             return True
@@ -87,144 +83,123 @@ class GNSSSerial(Node):
                 'Serial device not open, attempting reconnection...',
                 throttle_duration_sec=5.0
             )
+            self.on_init()
             return
-
-        latest_line = None
-        has_new_data = False
 
         try:
-            # Read all lines available in the input buffer to fetch only the newest line
-            while self.serial_port.in_waiting > 0:
-                line = self.serial_port.readline().decode('utf-8', errors='ignore').strip()
-                if line:
-                    latest_line = line
-                    has_new_data = True
+            waiting = self.serial_port.in_waiting
+            if waiting > 0:
+                chunk = self.serial_port.read(waiting).decode('utf-8', errors='ignore')
+                self._rx_buffer += chunk
         except serial.SerialException as e:
             self.get_logger().error(f'Error reading from serial port: {e}')
+            try:
+                self.serial_port.close()
+            except serial.SerialException:
+                pass
             return
 
-        if has_new_data and latest_line:
-            self.parse(latest_line)
+        # Wait until at least one complete newline-terminated frame is available
+        if '\n' not in self._rx_buffer:
+            return
 
-            if self.gnss_valid:
-                timestamp: Time
-                if self.gnss_timestamp_valid:
-                    now_utc = datetime.datetime.now(datetime.timezone.utc)
-                    current_date = now_utc.date()
+        # Stamp immediately upon receiving a complete packet using the ROS 2 host clock
+        stamp_msg = self.get_clock().now().to_msg()
 
-                    # UTC Midnight Rollover Protection
-                    if now_utc.hour == 23 and self.hour == 0:
-                        current_date += datetime.timedelta(days=1)
-                    elif now_utc.hour == 0 and self.hour == 23:
-                        current_date -= datetime.timedelta(days=1)
+        # Split lines and keep any incomplete trailing fragment for the next timer cycle
+        lines = self._rx_buffer.split('\n')
+        self._rx_buffer = lines[-1]
 
-                    gnss_dt = datetime.datetime(
-                        year=current_date.year,
-                        month=current_date.month,
-                        day=current_date.day,
-                        hour=self.hour,
-                        minute=self.minute,
-                        second=self.second,
-                        tzinfo=datetime.timezone.utc
-                    )
+        # Extract the most recent complete non-empty line
+        latest_line = next((line.strip() for line in reversed(lines[:-1]) if line.strip()), None)
+        if not latest_line:
+            return
 
-                    seconds_since_epoch = int(gnss_dt.timestamp())
-                    timestamp = Time(seconds=seconds_since_epoch, nanoseconds=self.nanosecond)
-                else:
-                    timestamp = self.get_clock().now()
+        self.parse(latest_line)
 
-                # 1. NavSatFix Message
-                gnss_msg = NavSatFix()
-                gnss_msg.header.stamp = timestamp.to_msg()
-                gnss_msg.header.frame_id = 'gnss_link'
+        if self.gnss_valid:
+            # 1. NavSatFix Message
+            gnss_msg = NavSatFix()
+            gnss_msg.header.stamp = stamp_msg
+            gnss_msg.header.frame_id = self.frame_id
 
-                gnss_msg.latitude = self.latitude
-                gnss_msg.longitude = self.longitude
-                gnss_msg.altitude = self.altitude
+            gnss_msg.latitude = self.latitude
+            gnss_msg.longitude = self.longitude
+            gnss_msg.altitude = self.altitude
 
-                # Status based on fix type
-                if self.fix_type >= 3:
-                    gnss_msg.status.status = NavSatStatus.STATUS_FIX
-                elif self.fix_type == 2:
-                    gnss_msg.status.status = NavSatStatus.STATUS_SBAS_FIX
-                else:
-                    gnss_msg.status.status = NavSatStatus.STATUS_NO_FIX
+            # Status based on fix type
+            if self.fix_type >= 3:
+                gnss_msg.status.status = NavSatStatus.STATUS_FIX
+            elif self.fix_type == 2:
+                gnss_msg.status.status = NavSatStatus.STATUS_SBAS_FIX
+            else:
+                gnss_msg.status.status = NavSatStatus.STATUS_NO_FIX
 
-                gnss_msg.status.service = NavSatStatus.SERVICE_GPS
+            gnss_msg.status.service = NavSatStatus.SERVICE_GPS
 
-                # Position covariance based on RTK status
-                position_covariance = 1.0  # 1 meter default std dev
-                if self.carrier_solution == 2:      # RTK Fix
-                    position_covariance = 0.01      # 1cm
-                elif self.carrier_solution == 1:    # RTK Float
-                    position_covariance = 0.02      # 2cm
-                elif self.carrier_solution == 0:
-                    position_covariance = 0.2       # 20cm
+            # Position covariance (variance in m^2 = std_dev^2)
+            std_dev = 1.0  # 1.0 m default
+            if self.carrier_solution == 2:      # RTK Fix
+                std_dev = 0.01                  # 1 cm
+            elif self.carrier_solution == 1:    # RTK Float
+                std_dev = 0.05                  # 5 cm
+            elif self.carrier_solution == 0 and self.fix_type >= 3:
+                std_dev = 0.5                   # 50 cm standalone/SBAS
 
-                gnss_msg.position_covariance[0] = position_covariance      # East
-                gnss_msg.position_covariance[4] = position_covariance      # North
-                gnss_msg.position_covariance[8] = position_covariance * 2  # Up (less accurate)
-                gnss_msg.position_covariance_type = NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
+            variance = std_dev ** 2
+            gnss_msg.position_covariance[0] = variance        # East (m^2)
+            gnss_msg.position_covariance[4] = variance        # North (m^2)
+            gnss_msg.position_covariance[8] = (std_dev * 2.0) ** 2  # Up (m^2)
+            gnss_msg.position_covariance_type = NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
 
-                self.gnss_publisher_.publish(gnss_msg)
+            self.gnss_publisher_.publish(gnss_msg)
 
-                # 2. TwistStamped Message
-                velocity_msg = TwistStamped()
-                velocity_msg.header.stamp = timestamp.to_msg()
-                velocity_msg.header.frame_id = 'gnss_link'
-                velocity_msg.twist.linear.x = self.velocity
-                velocity_msg.twist.linear.y = 0.0
-                velocity_msg.twist.linear.z = 0.0
-                velocity_msg.twist.angular.x = 0.0
-                velocity_msg.twist.angular.y = 0.0
-                velocity_msg.twist.angular.z = 0.0
+            # 2. TwistStamped Message
+            velocity_msg = TwistStamped()
+            velocity_msg.header.stamp = stamp_msg
+            velocity_msg.header.frame_id = self.frame_id
+            velocity_msg.twist.linear.x = self.velocity
+            velocity_msg.twist.linear.y = 0.0
+            velocity_msg.twist.linear.z = 0.0
+            velocity_msg.twist.angular.x = 0.0
+            velocity_msg.twist.angular.y = 0.0
+            velocity_msg.twist.angular.z = 0.0
 
-                self.velocity_publisher_.publish(velocity_msg)
+            self.velocity_publisher_.publish(velocity_msg)
 
-                # 3. Fix Type Message
-                fix_type_msg = Int32()
-                fix_type_msg.data = self.fix_type
-                self.fix_type_publisher_.publish(fix_type_msg)
+            # 3. Fix Type Message
+            fix_type_msg = Int32()
+            fix_type_msg.data = self.fix_type
+            self.fix_type_publisher_.publish(fix_type_msg)
 
     def parse(self, raw_data: str) -> None:
         tokens = raw_data.split(',')
         if len(tokens) >= 6:
             try:
-                self.latitude = float(tokens[0])
-                self.longitude = float(tokens[1])
-                self.altitude = float(tokens[2])
-                self.velocity = float(tokens[3])
-                self.fix_type = int(tokens[4])
-                self.carrier_solution = int(tokens[5])
+                lat = float(tokens[0])
+                lon = float(tokens[1])
+                alt = float(tokens[2])
+                vel = float(tokens[3])
+                fix = int(tokens[4])
+                carr = int(tokens[5])
 
-                if len(tokens) >= 10:
-                    hour_tmp = int(tokens[6])
-                    minute_tmp = int(tokens[7])
-                    second_tmp = int(tokens[8])
-                    nanosecond_tmp = int(tokens[9])
-
-                    time_fields_valid = (
-                        0 <= hour_tmp < 24 and
-                        0 <= minute_tmp < 60 and
-                        0 <= second_tmp < 60
+                # Basic sanity bounds check on coordinates
+                if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+                    self.gnss_valid = False
+                    self.get_logger().warn(
+                        f"Out-of-range coordinates received: lat={lat}, lon={lon}",
+                        throttle_duration_sec=5.0
                     )
+                    return
 
-                    if time_fields_valid:
-                        self.hour = hour_tmp
-                        self.minute = minute_tmp
-                        self.second = second_tmp
-                        self.nanosecond = nanosecond_tmp
-                        self.gnss_timestamp_valid = True
-                    else:
-                        self.gnss_timestamp_valid = False
-                        self.get_logger().warn(
-                            f'Received GNSS time with invalid fields: hour={hour_tmp}, '
-                            f'minute={minute_tmp}, second={second_tmp}, nsec={nanosecond_tmp}'
-                        )
-                else:
-                    self.gnss_timestamp_valid = False
-
+                self.latitude = lat
+                self.longitude = lon
+                self.altitude = alt
+                self.velocity = vel
+                self.fix_type = fix
+                self.carrier_solution = carr
                 self.gnss_valid = True
+
             except ValueError:
                 self.gnss_valid = False
                 self.get_logger().warn(
@@ -234,7 +209,7 @@ class GNSSSerial(Node):
         else:
             self.gnss_valid = False
             self.get_logger().warn(
-                f"Failed to parse GNSS data: '{raw_data}', parsed {len(tokens)} of expected 9+ fields",
+                f"Failed to parse GNSS data: '{raw_data}', parsed {len(tokens)} of expected 6+ fields",
                 throttle_duration_sec=5.0
             )
 
@@ -249,9 +224,10 @@ def main(args=None) -> None:
     node = GNSSSerial()
 
     if not node.on_init():
-        sys.exit(-1)
+        node.destroy_node()
+        rclpy.shutdown()
+        sys.exit(1)
 
-    # Calculate timer period in seconds
     timer_period = 1.0 / node.publish_rate
     node.create_timer(timer_period, node.read)
 
@@ -261,7 +237,8 @@ def main(args=None) -> None:
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
